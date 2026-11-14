@@ -6,12 +6,29 @@ const KEY = 'state';
 const LS_KEY = 'inventario-tienda-state';
 const BACKUP_WARN_DAYS = 7;
 const MERGE_WINDOW_MS = 2 * 60 * 1000;
+const BRAND = { storeName: 'Sabor Nature', logo: 'img/logo-sabor-nature.png' };
+
+// Instagram examples with indicative prices.
+const SAMPLES = [
+  { ref: 'TE-ROJO-TAZA', name: 'Té rojo a la taza (cacao, calabaza y especias)', unit: 'g', price: 5.5, units: 800, photo: 'post-02.jpg' },
+  { ref: 'TE-ROJO-GRAN', name: 'Té rojo Romance de Granada · Azaria', unit: 'g', price: 6.2, units: 600, photo: 'post-07.jpg' },
+  { ref: 'TE-ROJO-GALL', name: 'Té rojo Galleta Festiva', unit: 'g', price: 5.5, units: 750, photo: 'post-08.jpg' },
+  { ref: 'TE-NEGRO-CALA', name: 'Té negro Calabaza Spicy', unit: 'g', price: 4.9, units: 500, photo: 'post-11.jpg' },
+  { ref: 'TE-VERDE-MANU', name: 'Té verde con miel de Manuka', unit: 'g', price: 6.5, units: 400, photo: 'post-06.jpg' },
+  { ref: 'ROO-CANAMO', name: 'Rooibos Cáñamo', unit: 'g', price: 5.2, units: 650, photo: 'post-05.jpg' },
+  { ref: 'ROO-VERDE-ESP', name: 'Rooibos verde especiado (novedad)', unit: 'g', price: 5.2, units: 150, photo: 'post-03.jpg' },
+  { ref: 'FIG-GAIA', name: 'Figura Diosa Gaia (Madre Tierra)', unit: 'ud', price: 34.9, units: 2, photo: 'post-00.jpg' },
+  { ref: 'COL-OJO-TIGRE', name: 'Colgante ojo de tigre facetado y plata', unit: 'ud', price: 24.9, units: 4, photo: 'post-01.jpg' },
+  { ref: 'SOL-BCOMP-50', name: 'Solaray B-Complex 50', unit: 'ud', price: 18.95, units: 6, photo: 'post-04.jpg' },
+  { ref: 'GRA-GARBANZO', name: 'Harina de garbanzo BIO · El Granero', unit: 'ud', price: 3.45, units: 8, photo: 'post-09.jpg' },
+  { ref: 'GRA-SARRACENO', name: 'Harina de trigo sarraceno BIO · El Granero', unit: 'ud', price: 3.95, units: 0, photo: 'post-10.jpg' },
+];
 
 const $ = (s, r = document) => r.querySelector(s);
 const $$ = (s, r = document) => [...r.querySelectorAll(s)];
 const uid = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
 const moneyFmt = new Intl.NumberFormat('es-ES', { style: 'currency', currency: 'EUR' });
-const numFmt = new Intl.NumberFormat('es-ES');
+const numFmt = new Intl.NumberFormat('es-ES', { maximumFractionDigits: 2 });
 const fmtMoney = (n) => moneyFmt.format(n || 0);
 const fmtNum = (n) => numFmt.format(n || 0);
 const fmtDateTime = (ts) => new Date(ts).toLocaleString('es-ES', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' });
@@ -26,6 +43,21 @@ const dayStart = (iso) => { const [y, m, d] = iso.split('-').map(Number); return
 const dayEnd = (iso) => dayStart(iso) + 86400000 - 1;
 const initials = (name) => (String(name).trim()[0] || '?').toUpperCase();
 
+/* ---------- Units (g priced per 100 g) ---------- */
+
+const unitOf = (p) => (p && p.unit === 'g' ? 'g' : 'ud');
+const isWeight = (p) => unitOf(p) === 'g';
+const priceFactor = (unit) => (unit === 'g' ? 0.01 : 1);
+const amountOf = (qty, price, unit) => round2(qty * price * priceFactor(unit));
+const priceUnitLabel = (unit) => (unit === 'g' ? '100 g' : 'ud');
+const fmtPrice = (price, unit) => (unit === 'g' ? `${fmtMoney(price)} / 100 g` : fmtMoney(price));
+const fmtQty = (q, unit) => {
+  if (unit === 'g') return Math.abs(q) >= 1000 ? `${fmtNum(q / 1000)} kg` : `${fmtNum(q)} g`;
+  return `${fmtNum(q)} ${Math.abs(q) === 1 ? 'ud.' : 'uds.'}`;
+};
+const stepOf = (p) => (isWeight(p) ? state.settings.weightStep : 1);
+const lowLimit = (p) => (isWeight(p) ? state.settings.lowStockG : state.settings.lowStock);
+
 const MOVE_LABEL = {
   alta: 'Alta', entrada: 'Entrada', salida: 'Salida', ajuste: 'Recuento',
   venta: 'Venta', anulacion: 'Venta anulada', baja: 'Baja',
@@ -33,8 +65,11 @@ const MOVE_LABEL = {
 
 function defaultState() {
   return {
-    version: 1,
-    settings: { title: 'Inventario de la tienda', storeName: '', lowStock: 2, logo: null, logoW: 0, logoH: 0, lastBackup: null },
+    version: 2,
+    settings: {
+      title: 'Inventario de la tienda', storeName: '', lowStock: 2, lowStockG: 200, weightStep: 50,
+      logo: null, logoW: 0, logoH: 0, lastBackup: null, brandApplied: false, samplesSeeded: false,
+    },
     products: [],
     movements: [],
     sales: [],
@@ -127,10 +162,12 @@ function addMovement(productId, delta, type, extra = {}) {
   return m;
 }
 
-function quickStep(id, d) {
+function quickStep(id, sign) {
   const p = productById(id);
   if (!p) return;
-  if (p.units + d < 0) { toast(`No quedan unidades de ${p.name}`); return; }
+  if (sign < 0 && p.units <= 0) { toast(`No queda nada de ${p.name}`); return; }
+  let d = sign * stepOf(p);
+  if (p.units + d < 0) d = -p.units;
   p.units += d;
   const now = Date.now();
   const last = state.movements[state.movements.length - 1];
@@ -171,28 +208,33 @@ const ICON_EDIT = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 20h4L
 
 function stockClass(p) {
   if (p.units <= 0) return 'out';
-  if (p.units <= state.settings.lowStock) return 'low';
+  if (p.units <= lowLimit(p)) return 'low';
   return '';
 }
 
 function rowHtml(p, i) {
   const cls = stockClass(p);
+  const unit = unitOf(p);
+  const step = stepOf(p);
   const badge = cls === 'out' ? '<span class="badge">Agotado</span>' : cls === 'low' ? '<span class="badge">Poco stock</span>' : '';
+  const sample = p.sample ? '<span class="badge sample">Ejemplo</span>' : '';
   const thumb = p.photo ? `<img src="${p.photo}" alt="" loading="lazy">` : esc(initials(p.name));
+  const shown = unit === 'g' ? fmtNum(p.units) : fmtNum(p.units);
+  const small = unit === 'g' ? 'g' : 'uds.';
   return `<li class="row ${cls}" data-id="${p.id}" style="--i:${Math.min(i, 20)}">
     <div class="thumb">${thumb}</div>
     <div class="info">
       <span class="ref">${esc(p.ref)}</span>
       <span class="name">${esc(p.name)}</span>
-      <span class="price">${fmtMoney(p.price)}<span class="value">· ${fmtMoney(p.price * p.units)} en stock</span></span>
+      <span class="price">${fmtPrice(p.price, unit)}<span class="value">· ${fmtMoney(amountOf(p.units, p.price, unit))} en stock</span></span>
     </div>
     <div class="step-area">
       <div class="stepper">
-        <button type="button" class="dec" data-act="dec" aria-label="Restar una unidad">−</button>
-        <button type="button" class="units" data-act="adjust" title="Sumar, restar o fijar varias unidades"><b>${fmtNum(p.units)}</b><small>uds.</small></button>
-        <button type="button" class="inc" data-act="inc" aria-label="Sumar una unidad">+</button>
+        <button type="button" class="dec" data-act="dec" aria-label="Restar ${esc(fmtQty(step, unit))}">−</button>
+        <button type="button" class="units" data-act="adjust" title="Sumar, restar o fijar una cantidad"><b>${shown}</b><small>${small}</small></button>
+        <button type="button" class="inc" data-act="inc" aria-label="Sumar ${esc(fmtQty(step, unit))}">+</button>
       </div>
-      ${badge}
+      ${badge}${sample}
       <div class="row-actions">
         <button type="button" class="icon-btn sell" data-act="sell" title="Vender" aria-label="Vender">${ICON_SELL}</button>
         <button type="button" class="icon-btn" data-act="edit" title="Editar" aria-label="Editar">${ICON_EDIT}</button>
@@ -216,10 +258,12 @@ function sortedFiltered() {
   let list = activeProducts();
   if (q) list = list.filter((p) => norm(p.ref).includes(q) || norm(p.name).includes(q));
   const sort = $('#sort').value;
+  // Relative to each product's low-stock limit.
+  const ratio = (p) => (lowLimit(p) > 0 ? p.units / lowLimit(p) : p.units);
   const cmp = {
     name: (a, b) => a.name.localeCompare(b.name, 'es', { sensitivity: 'base' }),
     ref: (a, b) => a.ref.localeCompare(b.ref, 'es', { numeric: true, sensitivity: 'base' }),
-    units: (a, b) => a.units - b.units || a.name.localeCompare(b.name, 'es'),
+    units: (a, b) => ratio(a) - ratio(b) || a.name.localeCompare(b.name, 'es'),
     recent: (a, b) => b.createdAt - a.createdAt,
   }[sort];
   return list.sort(cmp);
@@ -236,8 +280,8 @@ function renderList() {
 function renderStats() {
   const all = activeProducts();
   $('#statProducts').textContent = fmtNum(all.length);
-  $('#statUnits').textContent = fmtNum(all.reduce((s, p) => s + p.units, 0));
-  $('#statValue').textContent = fmtMoney(all.reduce((s, p) => s + p.units * p.price, 0));
+  $('#statLow').textContent = fmtNum(all.filter((p) => stockClass(p) !== '').length);
+  $('#statValue').textContent = fmtMoney(all.reduce((s, p) => s + amountOf(p.units, p.price, unitOf(p)), 0));
   const from = dayStart(isoDay(new Date()));
   const today = state.sales.filter((s) => !s.voidedAt && s.date >= from && s.date <= from + 86400000 - 1).reduce((s, v) => s + v.total, 0);
   $('#statToday').textContent = fmtMoney(today);
@@ -256,7 +300,7 @@ function renderHeader() {
 
 function renderBackupWarn() {
   const s = state.settings;
-  const hasData = state.products.length > 0;
+  const hasData = state.products.some((p) => !p.sample);
   const days = s.lastBackup ? Math.floor((Date.now() - s.lastBackup) / 86400000) : null;
   const show = hasData && (days === null || days >= BACKUP_WARN_DAYS);
   $('#backupWarn').hidden = !show;
@@ -310,6 +354,18 @@ async function readImage(file, max, type, quality) {
   }
 }
 
+async function urlToDataUrl(url) {
+  const res = await fetch(url);
+  if (!res.ok) throw new Error(url);
+  const blob = await res.blob();
+  return new Promise((resolve, reject) => {
+    const r = new FileReader();
+    r.onload = () => resolve(r.result);
+    r.onerror = () => reject(r.error);
+    r.readAsDataURL(blob);
+  });
+}
+
 /* ---------- Dialog helpers ---------- */
 
 function openDlg(id) { const d = $(id); if (!d.open) d.showModal(); }
@@ -327,22 +383,35 @@ $$('dialog').forEach((d) => d.addEventListener('click', (e) => { if (e.target ==
 let editingId = null;
 let pendingPhoto;
 
+const formUnit = () => $('input[name=pUnit]:checked').value;
+
+function syncUnitLabels() {
+  const g = formUnit() === 'g';
+  $('#pPriceLabel').textContent = g ? 'Precio por 100 g (€)' : 'Precio (€)';
+  $('#pUnitsLabel').textContent = editingId ? (g ? 'Gramos en stock' : 'Unidades') : (g ? 'Gramos iniciales' : 'Unidades iniciales');
+  $('#pUnits').step = '1';
+}
+
 function openProduct(id = null) {
   editingId = id;
   const p = id ? productById(id) : null;
   pendingPhoto = p?.photo ?? null;
   $('#productDlgTitle').textContent = p ? 'Editar producto' : 'Nuevo producto';
-  $('#pUnitsLabel').textContent = p ? 'Unidades' : 'Unidades iniciales';
+  const unit = p ? unitOf(p) : 'ud';
+  $$('input[name=pUnit]').forEach((r) => { r.checked = r.value === unit; r.disabled = !!p; });
   $('#pRef').value = p?.ref ?? '';
   $('#pName').value = p?.name ?? '';
   $('#pPrice').value = p ? p.price : '';
   $('#pUnits').value = p ? p.units : '';
   $('#pDelete').hidden = !p;
+  syncUnitLabels();
   showError('#productError');
   paintPhoto();
   openDlg('#productDlg');
   setTimeout(() => (p ? $('#pName') : $('#pRef')).focus(), 50);
 }
+
+$$('input[name=pUnit]').forEach((r) => r.addEventListener('change', syncUnitLabels));
 
 function paintPhoto() {
   const img = $('#pPhotoPreview');
@@ -371,19 +440,19 @@ $('#productForm').addEventListener('submit', (e) => {
   const units = Math.trunc(Number($('#pUnits').value));
   if (!ref || !name) return showError('#productError', 'La referencia y el nombre son obligatorios.');
   if (!(price >= 0)) return showError('#productError', 'El precio no es válido.');
-  if (!Number.isFinite(units) || units < 0) return showError('#productError', 'Las unidades tienen que ser 0 o más.');
+  if (!Number.isFinite(units) || units < 0) return showError('#productError', 'Las existencias tienen que ser 0 o más.');
   const dup = activeProducts().find((p) => p.id !== editingId && norm(p.ref) === norm(ref));
   if (dup) return showError('#productError', `La referencia ${ref} ya la usa «${dup.name}».`);
 
   if (editingId) {
     const p = productById(editingId);
     const diff = units - p.units;
-    Object.assign(p, { ref, name, price, photo: pendingPhoto });
+    Object.assign(p, { ref, name, price, photo: pendingPhoto, sample: false });
     if (diff !== 0) { p.units = units; addMovement(p.id, diff, 'ajuste', { note: 'Editado a mano' }); }
     toast('Producto actualizado');
   } else {
     const now = Date.now();
-    const p = { id: uid(), ref, name, price, units, photo: pendingPhoto, createdAt: now, deletedAt: null };
+    const p = { id: uid(), ref, name, unit: formUnit(), price, units, photo: pendingPhoto, createdAt: now, deletedAt: null };
     state.products.push(p);
     addMovement(p.id, units, 'alta', { date: now });
     toast('Producto añadido');
@@ -415,7 +484,8 @@ function openAdjust(id) {
   adjustingId = id;
   $('#aRef').textContent = p.ref;
   $('#aName').textContent = p.name;
-  $('#aUnits').textContent = fmtNum(p.units);
+  $('#aUnits').textContent = fmtQty(p.units, unitOf(p));
+  $('#aQtyLabel').textContent = isWeight(p) ? 'Cantidad en gramos' : 'Cantidad en unidades';
   $('#aQty').value = '';
   $('#aNote').value = '';
   showError('#adjustError');
@@ -426,6 +496,7 @@ function openAdjust(id) {
 $('#adjustForm').addEventListener('submit', (e) => e.preventDefault());
 $$('[data-adjust]').forEach((b) => b.addEventListener('click', () => {
   const p = productById(adjustingId);
+  const unit = unitOf(p);
   const qty = Math.trunc(Number($('#aQty').value));
   const note = $('#aNote').value.trim();
   const mode = b.dataset.adjust;
@@ -434,7 +505,7 @@ $$('[data-adjust]').forEach((b) => b.addEventListener('click', () => {
   if (mode === 'add') delta = qty;
   else if (mode === 'sub') delta = -qty;
   else delta = qty - p.units;
-  if (p.units + delta < 0) return showError('#adjustError', `Solo hay ${p.units} unidades.`);
+  if (p.units + delta < 0) return showError('#adjustError', `Solo hay ${fmtQty(p.units, unit)}.`);
   if (delta === 0) { closeDlg(b); return; }
   p.units += delta;
   addMovement(p.id, delta, mode === 'set' ? 'ajuste' : delta > 0 ? 'entrada' : 'salida', { note });
@@ -443,7 +514,7 @@ $$('[data-adjust]').forEach((b) => b.addEventListener('click', () => {
   updateRow(p);
   renderStats();
   $(`.row[data-id="${p.id}"]`)?.classList.add('flash');
-  toast(`${p.name}: ${delta > 0 ? '+' : ''}${delta} → ${p.units} uds.`);
+  toast(`${p.name}: ${delta > 0 ? '+' : '−'}${fmtQty(Math.abs(delta), unit)} → ${fmtQty(p.units, unit)}`);
 }));
 
 /* ---------- List events ---------- */
@@ -483,8 +554,8 @@ function openSale(preselectId = null) {
 function addSaleLine(id) {
   const p = productById(id);
   const line = saleLines.find((l) => l.productId === id);
-  if (line) line.qty += 1;
-  else saleLines.push({ productId: id, qty: 1, price: p.price });
+  if (line) line.qty += isWeight(p) ? stepOf(p) : 1;
+  else saleLines.push({ productId: id, qty: isWeight(p) ? 100 : 1, price: p.price });
 }
 
 function renderResults() {
@@ -496,7 +567,7 @@ function renderResults() {
     ? found.map((p) => `<li><button type="button" data-pick="${p.id}">
         <span class="mini">${p.photo ? `<img src="${p.photo}" alt="">` : esc(initials(p.name))}</span>
         <span><span class="ref">${esc(p.ref)}</span><br><span class="r-name">${esc(p.name)}</span></span>
-        <span class="r-units">${fmtMoney(p.price)}<br>${fmtNum(p.units)} uds.</span>
+        <span class="r-units">${fmtPrice(p.price, unitOf(p))}<br>${fmtQty(p.units, unitOf(p))}</span>
       </button></li>`).join('')
     : '<li class="r-none">No hay productos con ese nombre o referencia.</li>';
   ul.hidden = false;
@@ -506,12 +577,13 @@ function renderSale() {
   const tbody = $('#sLines');
   tbody.innerHTML = saleLines.map((l, i) => {
     const p = productById(l.productId);
+    const unit = unitOf(p);
     const short = l.qty > p.units;
     return `<tr data-i="${i}">
-      <td class="l-name">${esc(p.name)}<small>${esc(p.ref)} · quedan ${fmtNum(p.units)}</small>${short ? '<span class="warn">No hay tantas unidades</span>' : ''}</td>
-      <td class="num"><input type="number" class="l-qty" min="1" step="1" inputmode="numeric" value="${l.qty}"></td>
-      <td class="num"><input type="number" class="l-price" min="0" step="0.01" inputmode="decimal" value="${l.price}"></td>
-      <td class="num l-sub">${fmtMoney(l.qty * l.price)}</td>
+      <td class="l-name">${esc(p.name)}<small>${esc(p.ref)} · quedan ${fmtQty(p.units, unit)}</small>${short ? '<span class="warn">No hay tanto en stock</span>' : ''}</td>
+      <td class="num"><input type="number" class="l-qty" min="1" step="1" inputmode="numeric" value="${l.qty}"><span class="unit-suffix">${unit === 'g' ? 'g' : 'uds.'}</span></td>
+      <td class="num"><input type="number" class="l-price" min="0" step="0.01" inputmode="decimal" value="${l.price}">${unit === 'g' ? '<span class="l-price-unit">€/100 g</span>' : ''}</td>
+      <td class="num l-sub">${fmtMoney(amountOf(l.qty || 0, l.price || 0, unit))}</td>
       <td><button type="button" class="l-del" aria-label="Quitar">×</button></td>
     </tr>`;
   }).join('');
@@ -523,15 +595,15 @@ function saleProblems() {
   if (!saleLines.length) return 'empty';
   for (const l of saleLines) {
     const p = productById(l.productId);
-    if (!(l.qty >= 1) || !Number.isInteger(l.qty)) return `Revisa las unidades de «${p.name}».`;
+    if (!(l.qty >= 1) || !Number.isInteger(l.qty)) return `Revisa la cantidad de «${p.name}».`;
     if (!(l.price >= 0)) return `Revisa el precio de «${p.name}».`;
-    if (l.qty > p.units) return `De «${p.name}» solo quedan ${p.units}. Ajusta el stock antes si hace falta.`;
+    if (l.qty > p.units) return `De «${p.name}» solo quedan ${fmtQty(p.units, unitOf(p))}. Ajusta el stock antes si hace falta.`;
   }
   return null;
 }
 
 function updateSaleTotal() {
-  const total = saleLines.reduce((s, l) => s + (l.qty || 0) * (l.price || 0), 0);
+  const total = saleLines.reduce((s, l) => s + amountOf(l.qty || 0, l.price || 0, unitOf(productById(l.productId))), 0);
   $('#sTotal').textContent = fmtMoney(total);
   $('#sSubmit').disabled = saleProblems() !== null;
 }
@@ -556,7 +628,7 @@ $('#sLines').addEventListener('input', (e) => {
   const l = saleLines[Number(tr.dataset.i)];
   if (e.target.classList.contains('l-qty')) l.qty = Number(e.target.value);
   if (e.target.classList.contains('l-price')) l.price = round2(e.target.value);
-  tr.querySelector('.l-sub').textContent = fmtMoney((l.qty || 0) * (l.price || 0));
+  tr.querySelector('.l-sub').textContent = fmtMoney(amountOf(l.qty || 0, l.price || 0, unitOf(productById(l.productId))));
   updateSaleTotal();
 });
 $('#sLines').addEventListener('change', (e) => {
@@ -576,9 +648,9 @@ $('#saleForm').addEventListener('submit', (e) => {
   const id = uid();
   const lines = saleLines.map((l) => {
     const p = productById(l.productId);
-    return { productId: p.id, ref: p.ref, name: p.name, qty: l.qty, price: round2(l.price) };
+    return { productId: p.id, ref: p.ref, name: p.name, unit: unitOf(p), qty: l.qty, price: round2(l.price) };
   });
-  const total = round2(lines.reduce((s, l) => s + l.qty * l.price, 0));
+  const total = round2(lines.reduce((s, l) => s + amountOf(l.qty, l.price, l.unit), 0));
   const number = ++state.saleSeq;
   state.sales.push({ id, number, date, lines, total, voidedAt: null });
   for (const l of lines) {
@@ -595,7 +667,7 @@ $('#saleForm').addEventListener('submit', (e) => {
 function voidSale(id) {
   const s = state.sales.find((x) => x.id === id);
   if (!s || s.voidedAt) return;
-  if (!confirm(`¿Anular la venta nº ${s.number} (${fmtMoney(s.total)})? Las unidades vuelven al inventario.`)) return;
+  if (!confirm(`¿Anular la venta nº ${s.number} (${fmtMoney(s.total)})? Lo vendido vuelve al inventario.`)) return;
   s.voidedAt = Date.now();
   for (const l of s.lines) {
     const p = productById(l.productId);
@@ -637,7 +709,7 @@ function renderHistory() {
     body.innerHTML = `<p class="h-summary"><b>${valid.length}</b> ventas · <b>${fmtMoney(sum)}</b> en el periodo</p>` + (sales.length
       ? sales.map((s) => `<article class="h-sale ${s.voidedAt ? 'voided' : ''}">
           <div class="h-head"><span class="h-num">Nº ${s.number}</span><span class="h-date">${fmtDateTime(s.date)}</span><span class="h-total">${fmtMoney(s.total)}</span></div>
-          <ul class="h-lines">${s.lines.map((l) => `<li><span>${l.qty} ×</span><span>${esc(l.name)}</span><span>${fmtMoney(l.qty * l.price)}</span></li>`).join('')}</ul>
+          <ul class="h-lines">${s.lines.map((l) => `<li><span>${fmtQty(l.qty, l.unit || 'ud')}</span><span>${esc(l.name)}</span><span>${fmtMoney(amountOf(l.qty, l.price, l.unit || 'ud'))}</span></li>`).join('')}</ul>
           <div class="h-foot">${s.voidedAt ? `<span class="h-tag">Anulada el ${fmtDay(s.voidedAt)}</span>` : `<button type="button" class="btn btn-ghost btn-small" data-void="${s.id}">Anular venta</button>`}</div>
         </article>`).join('')
       : '<p class="empty">No hay ventas en estas fechas.</p>');
@@ -646,10 +718,11 @@ function renderHistory() {
     body.innerHTML = moves.length
       ? `<table class="moves"><tbody>${moves.map((m) => {
           const p = productById(m.productId);
+          const unit = unitOf(p);
           return `<tr>
             <td class="m-date">${fmtDateTime(m.date)}</td>
             <td><span class="m-type">${MOVE_LABEL[m.type] || m.type}</span><br>${esc(p ? p.name : '—')}${m.note ? `<br><span class="muted">${esc(m.note)}</span>` : ''}</td>
-            <td class="m-delta ${m.delta > 0 ? 'pos' : 'neg'}">${m.delta > 0 ? '+' : ''}${m.delta}</td>
+            <td class="m-delta ${m.delta > 0 ? 'pos' : 'neg'}">${m.delta > 0 ? '+' : '−'}${fmtQty(Math.abs(m.delta), unit)}</td>
           </tr>`;
         }).join('')}</tbody></table>`
       : '<p class="empty">No hay movimientos en estas fechas.</p>';
@@ -670,43 +743,39 @@ $('#historyBody').addEventListener('click', (e) => {
 
 /* ---------- Reports ---------- */
 
+const byRef = (a, b) => a.ref.localeCompare(b.ref, 'es', { numeric: true, sensitivity: 'base' });
+
 function currentReport() {
-  const rows = activeProducts()
-    .sort((a, b) => a.ref.localeCompare(b.ref, 'es', { numeric: true, sensitivity: 'base' }))
-    .map((p) => ({ ref: p.ref, name: p.name, price: p.price, units: p.units, value: round2(p.price * p.units), photo: p.photo }));
-  return {
-    rows,
-    units: rows.reduce((s, r) => s + r.units, 0),
-    value: round2(rows.reduce((s, r) => s + r.value, 0)),
-  };
+  const rows = activeProducts().sort(byRef).map((p) => {
+    const unit = unitOf(p);
+    return { ref: p.ref, name: p.name, unit, price: p.price, units: p.units, value: amountOf(p.units, p.price, unit), photo: p.photo };
+  });
+  return { rows, value: round2(rows.reduce((s, r) => s + r.value, 0)) };
 }
 
 function rangeReport(from, to) {
   const byProduct = groupMoves();
   const rows = state.products
     .filter((p) => p.createdAt <= to && (!p.deletedAt || p.deletedAt >= from))
-    .sort((a, b) => a.ref.localeCompare(b.ref, 'es', { numeric: true, sensitivity: 'base' }))
+    .sort(byRef)
     .map((p) => {
+      const unit = unitOf(p);
       const moves = (byProduct.get(p.id) || []).filter((m) => m.date >= from && m.date <= to);
       const end = stockAt(p, to, byProduct);
-      let net = 0, inUnits = 0, sold = 0, out = 0, amount = 0;
+      let net = 0, inQty = 0, sold = 0, out = 0, amount = 0;
       for (const m of moves) {
         net += m.delta;
         if (m.type === 'venta' || m.type === 'anulacion') {
           sold -= m.delta;
-          amount -= m.delta * (m.price ?? p.price);
-        } else if (m.delta > 0) inUnits += m.delta;
+          amount -= m.delta * (m.price ?? p.price) * priceFactor(unit);
+        } else if (m.delta > 0) inQty += m.delta;
         else out -= m.delta;
       }
-      return { ref: p.ref, name: p.name, price: p.price, start: end - net, in: inUnits, sold, out, end, amount: round2(amount), deleted: !!p.deletedAt && p.deletedAt <= to };
+      return { ref: p.ref, name: p.name, unit, price: p.price, start: end - net, in: inQty, sold, out, end, amount: round2(amount), deleted: !!p.deletedAt && p.deletedAt <= to };
     });
   const sales = state.sales.filter((s) => s.date >= from && s.date <= to).sort((a, b) => a.date - b.date);
   const moves = state.movements.filter((m) => m.date >= from && m.date <= to).sort((a, b) => a.date - b.date);
-  return {
-    rows, sales, moves,
-    sold: rows.reduce((s, r) => s + r.sold, 0),
-    amount: round2(rows.reduce((s, r) => s + r.amount, 0)),
-  };
+  return { rows, sales, moves, amount: round2(rows.reduce((s, r) => s + r.amount, 0)) };
 }
 
 function reportTitle() {
@@ -740,12 +809,12 @@ function exportExcel(mode, from, to, fileBase) {
       [title],
       [`Inventario a ${fmtDateTime(Date.now())}`],
       [],
-      ['Referencia', 'Producto', 'Precio', 'Unidades', 'Valor'],
-      ...r.rows.map((x) => [x.ref, x.name, x.price, x.units, x.value]),
+      ['Referencia', 'Producto', 'Precio', 'Precio por', 'Existencias', 'Unidad', 'Valor'],
+      ...r.rows.map((x) => [x.ref, x.name, x.price, priceUnitLabel(x.unit), x.units, x.unit, x.value]),
       [],
-      ['', 'TOTAL', '', r.units, r.value],
+      ['', 'TOTAL', '', '', '', '', r.value],
     ];
-    XLSX.utils.book_append_sheet(wb, sheetFrom(aoa, [2, 4], 3, [16, 40, 12, 10, 14]), 'Inventario');
+    XLSX.utils.book_append_sheet(wb, sheetFrom(aoa, [2, 6], 3, [16, 44, 11, 10, 12, 8, 14]), 'Inventario');
   } else {
     const r = rangeReport(from, to);
     const period = `Del ${fmtDay(from)} al ${fmtDay(to)}`;
@@ -753,27 +822,30 @@ function exportExcel(mode, from, to, fileBase) {
       [title],
       [`Movimiento de inventario · ${period}`],
       [],
-      ['Referencia', 'Producto', 'Precio', 'Stock inicial', 'Entradas', 'Vendidas', 'Otras salidas', 'Stock final', 'Importe vendido'],
-      ...r.rows.map((x) => [x.ref, x.deleted ? `${x.name} (eliminado)` : x.name, x.price, x.start, x.in, x.sold, x.out, x.end, x.amount]),
+      ['Referencia', 'Producto', 'Unidad', 'Precio', 'Precio por', 'Stock inicial', 'Entradas', 'Vendido', 'Otras salidas', 'Stock final', 'Importe vendido'],
+      ...r.rows.map((x) => [x.ref, x.deleted ? `${x.name} (eliminado)` : x.name, x.unit, x.price, priceUnitLabel(x.unit), x.start, x.in, x.sold, x.out, x.end, x.amount]),
       [],
-      ['', 'TOTAL', '', '', '', r.sold, '', '', r.amount],
+      ['', 'TOTAL', '', '', '', '', '', '', '', '', r.amount],
     ];
-    XLSX.utils.book_append_sheet(wb, sheetFrom(summary, [2, 8], 3, [16, 40, 12, 13, 11, 11, 13, 12, 16]), 'Resumen');
+    XLSX.utils.book_append_sheet(wb, sheetFrom(summary, [3, 10], 3, [16, 44, 8, 11, 10, 12, 10, 10, 12, 11, 16]), 'Resumen');
 
     const salesAoa = [
-      ['Nº venta', 'Fecha', 'Referencia', 'Producto', 'Unidades', 'Precio', 'Importe', 'Estado'],
-      ...r.sales.flatMap((s) => s.lines.map((l) => [s.number, fmtDateTime(s.date), l.ref, l.name, l.qty, l.price, round2(l.qty * l.price), s.voidedAt ? `Anulada ${fmtDay(s.voidedAt)}` : ''])),
+      ['Nº venta', 'Fecha', 'Referencia', 'Producto', 'Cantidad', 'Unidad', 'Precio', 'Precio por', 'Importe', 'Estado'],
+      ...r.sales.flatMap((s) => s.lines.map((l) => {
+        const unit = l.unit || 'ud';
+        return [s.number, fmtDateTime(s.date), l.ref, l.name, l.qty, unit, l.price, priceUnitLabel(unit), amountOf(l.qty, l.price, unit), s.voidedAt ? `Anulada ${fmtDay(s.voidedAt)}` : ''];
+      })),
     ];
-    XLSX.utils.book_append_sheet(wb, sheetFrom(salesAoa, [5, 6], 0, [9, 17, 16, 36, 10, 11, 12, 18]), 'Ventas');
+    XLSX.utils.book_append_sheet(wb, sheetFrom(salesAoa, [6, 8], 0, [9, 17, 16, 40, 10, 8, 10, 10, 12, 18]), 'Ventas');
 
     const movesAoa = [
-      ['Fecha', 'Tipo', 'Referencia', 'Producto', 'Cantidad', 'Nota'],
+      ['Fecha', 'Tipo', 'Referencia', 'Producto', 'Cantidad', 'Unidad', 'Nota'],
       ...r.moves.map((m) => {
         const p = productById(m.productId);
-        return [fmtDateTime(m.date), MOVE_LABEL[m.type] || m.type, p?.ref ?? '', p?.name ?? '', m.delta, m.note || ''];
+        return [fmtDateTime(m.date), MOVE_LABEL[m.type] || m.type, p?.ref ?? '', p?.name ?? '', m.delta, unitOf(p), m.note || ''];
       }),
     ];
-    XLSX.utils.book_append_sheet(wb, sheetFrom(movesAoa, [], 0, [17, 14, 16, 36, 10, 36]), 'Movimientos');
+    XLSX.utils.book_append_sheet(wb, sheetFrom(movesAoa, [], 0, [17, 14, 16, 40, 10, 8, 36]), 'Movimientos');
   }
   XLSX.writeFile(wb, `${fileBase}.xlsx`);
 }
@@ -782,34 +854,38 @@ function exportExcel(mode, from, to, fileBase) {
 
 const pdfText = (s) => String(s).replace(/[  ]/g, ' ');
 const pdfMoney = (n) => pdfText(fmtMoney(n));
+const pdfPrice = (price, unit) => pdfText(fmtPrice(price, unit));
+const pdfQty = (q, unit) => pdfText(unit === 'g' ? fmtQty(q, unit) : fmtNum(q));
 const imgFormat = (dataUrl) => (/^data:image\/png/i.test(dataUrl) ? 'PNG' : 'JPEG');
-const INK = [31, 28, 23];
-const ACCENT = [200, 67, 27];
-const SOFT = [246, 241, 232];
+const INK = [43, 43, 43];
+const BRAND_GREEN = [91, 138, 18];
+const PLUM = [142, 74, 168];
+const DANGER = [181, 69, 42];
+const SOFT = [245, 243, 234];
 
 function pdfHeader(doc, subtitle) {
   const s = state.settings;
   const W = doc.internal.pageSize.getWidth();
   let x = 14;
   if (s.logo && s.logoW && s.logoH) {
-    const maxW = 34, maxH = 20;
+    const maxW = 26, maxH = 24;
     const k = Math.min(maxW / s.logoW, maxH / s.logoH);
     const w = s.logoW * k, h = s.logoH * k;
-    try { doc.addImage(s.logo, imgFormat(s.logo), 14, 12 + (maxH - h) / 2, w, h); x = 14 + w + 6; } catch { /* unreadable logo */ }
+    try { doc.addImage(s.logo, imgFormat(s.logo), 14, 10 + (maxH - h) / 2, w, h); x = 14 + w + 5; } catch { /* unreadable logo */ }
   }
   if (s.storeName) {
-    doc.setFont('helvetica', 'bold'); doc.setFontSize(8); doc.setTextColor(...ACCENT);
+    doc.setFont('helvetica', 'bold'); doc.setFontSize(8); doc.setTextColor(...PLUM);
     doc.text(pdfText(s.storeName.toUpperCase()), x, 17);
   }
   doc.setFont('helvetica', 'bold'); doc.setFontSize(18); doc.setTextColor(...INK);
   doc.text(pdfText(s.title), x, s.storeName ? 25 : 22);
-  doc.setFont('helvetica', 'normal'); doc.setFontSize(10); doc.setTextColor(110, 102, 88);
+  doc.setFont('helvetica', 'normal'); doc.setFontSize(10); doc.setTextColor(110, 108, 92);
   doc.text(pdfText(subtitle), x, s.storeName ? 31 : 28);
   doc.setDrawColor(...INK); doc.setLineWidth(0.6);
-  doc.line(14, 36, W - 14, 36);
-  doc.setLineWidth(0.2);
-  doc.line(14, 37.2, W - 14, 37.2);
-  return 43;
+  doc.line(14, 37, W - 14, 37);
+  doc.setDrawColor(165, 206, 50); doc.setLineWidth(0.9);
+  doc.line(14, 38.4, W - 14, 38.4);
+  return 45;
 }
 
 function pdfFooter(doc) {
@@ -818,7 +894,7 @@ function pdfFooter(doc) {
     doc.setPage(i);
     const W = doc.internal.pageSize.getWidth();
     const H = doc.internal.pageSize.getHeight();
-    doc.setFont('helvetica', 'normal'); doc.setFontSize(8); doc.setTextColor(140, 132, 118);
+    doc.setFont('helvetica', 'normal'); doc.setFontSize(8); doc.setTextColor(140, 138, 120);
     doc.text(pdfText(`Generado el ${fmtDateTime(Date.now())}`), 14, H - 8);
     doc.text(`Página ${i} de ${total}`, W - 14, H - 8, { align: 'right' });
   }
@@ -827,10 +903,10 @@ function pdfFooter(doc) {
 const tableBase = {
   theme: 'plain',
   margin: { left: 14, right: 14, bottom: 16 },
-  styles: { font: 'helvetica', fontSize: 9, cellPadding: 2.2, textColor: INK, lineColor: [217, 207, 189], lineWidth: { bottom: 0.2 } },
-  headStyles: { fillColor: INK, textColor: [243, 237, 226], fontStyle: 'bold', fontSize: 8 },
+  styles: { font: 'helvetica', fontSize: 9, cellPadding: 2.2, textColor: INK, lineColor: [220, 216, 196], lineWidth: { bottom: 0.2 } },
+  headStyles: { fillColor: INK, textColor: [245, 243, 234], fontStyle: 'bold', fontSize: 8 },
   alternateRowStyles: { fillColor: SOFT },
-  footStyles: { fillColor: [235, 227, 212], textColor: INK, fontStyle: 'bold' },
+  footStyles: { fillColor: [230, 240, 207], textColor: INK, fontStyle: 'bold' },
 };
 
 function exportPdf(mode, from, to, fileBase) {
@@ -842,15 +918,15 @@ function exportPdf(mode, from, to, fileBase) {
     doc.autoTable({
       ...tableBase,
       startY,
-      head: [['Foto', 'Ref.', 'Producto', 'Precio', 'Uds.', 'Valor']],
-      body: r.rows.map((x) => ['', pdfText(x.ref), pdfText(x.name), pdfMoney(x.price), String(x.units), pdfMoney(x.value)]),
-      foot: [['', '', 'TOTAL', '', String(r.units), pdfMoney(r.value)]],
+      head: [['Foto', 'Ref.', 'Producto', 'Precio', 'Existencias', 'Valor']],
+      body: r.rows.map((x) => ['', pdfText(x.ref), pdfText(x.name), pdfPrice(x.price, x.unit), pdfQty(x.units, x.unit) + (x.unit === 'g' ? '' : ' uds.'), pdfMoney(x.value)]),
+      foot: [['', '', 'TOTAL', '', '', pdfMoney(r.value)]],
       columnStyles: {
         0: { cellWidth: 16, minCellHeight: 14 },
-        1: { cellWidth: 26, fontStyle: 'bold' },
-        3: { halign: 'right', cellWidth: 24 },
-        4: { halign: 'right', cellWidth: 16 },
-        5: { halign: 'right', cellWidth: 28 },
+        1: { cellWidth: 28, fontStyle: 'bold' },
+        3: { halign: 'right', cellWidth: 30 },
+        4: { halign: 'right', cellWidth: 22 },
+        5: { halign: 'right', cellWidth: 24 },
       },
       bodyStyles: { valign: 'middle' },
       didDrawCell: (d) => {
@@ -858,7 +934,7 @@ function exportPdf(mode, from, to, fileBase) {
         const photo = r.rows[d.row.index]?.photo;
         if (!photo) return;
         const size = Math.min(d.cell.width, d.cell.height) - 2;
-        try { doc.addImage(photo, 'JPEG', d.cell.x + (d.cell.width - size) / 2, d.cell.y + (d.cell.height - size) / 2, size, size); } catch { /* broken photo */ }
+        try { doc.addImage(photo, imgFormat(photo), d.cell.x + (d.cell.width - size) / 2, d.cell.y + (d.cell.height - size) / 2, size, size); } catch { /* broken photo */ }
       },
     });
     pdfFooter(doc);
@@ -872,34 +948,38 @@ function exportPdf(mode, from, to, fileBase) {
   doc.autoTable({
     ...tableBase,
     startY,
-    head: [['Ref.', 'Producto', 'Precio', 'Stock inicial', 'Entradas', 'Vendidas', 'Otras salidas', 'Stock final', 'Importe vendido']],
-    body: r.rows.map((x) => [pdfText(x.ref), pdfText(x.deleted ? `${x.name} (eliminado)` : x.name), pdfMoney(x.price), x.start, x.in, x.sold, x.out, x.end, pdfMoney(x.amount)].map(String)),
-    foot: [['', 'TOTAL', '', '', '', String(r.sold), '', '', pdfMoney(r.amount)]],
+    head: [['Ref.', 'Producto', 'Precio', 'Stock inicial', 'Entradas', 'Vendido', 'Otras salidas', 'Stock final', 'Importe vendido']],
+    body: r.rows.map((x) => [
+      pdfText(x.ref), pdfText(x.deleted ? `${x.name} (eliminado)` : x.name), pdfPrice(x.price, x.unit),
+      pdfQty(x.start, x.unit), pdfQty(x.in, x.unit), pdfQty(x.sold, x.unit), pdfQty(x.out, x.unit), pdfQty(x.end, x.unit), pdfMoney(x.amount),
+    ]),
+    foot: [['', 'TOTAL', '', '', '', '', '', '', pdfMoney(r.amount)]],
     columnStyles: {
-      0: { cellWidth: 28, fontStyle: 'bold' },
-      2: { halign: 'right' }, 3: { halign: 'right' }, 4: { halign: 'right' }, 5: { halign: 'right' },
+      0: { cellWidth: 30, fontStyle: 'bold' },
+      2: { halign: 'right', cellWidth: 30 }, 3: { halign: 'right' }, 4: { halign: 'right' }, 5: { halign: 'right' },
       6: { halign: 'right' }, 7: { halign: 'right', fontStyle: 'bold' }, 8: { halign: 'right' },
     },
   });
 
   let y = doc.lastAutoTable.finalY + 12;
   if (y > doc.internal.pageSize.getHeight() - 40) { doc.addPage(); y = 20; }
-  doc.setFont('helvetica', 'bold'); doc.setFontSize(13); doc.setTextColor(...INK);
+  doc.setFont('helvetica', 'bold'); doc.setFontSize(13); doc.setTextColor(...BRAND_GREEN);
   doc.text('Ventas del periodo', 14, y);
-  const saleRows = r.sales.flatMap((s) => s.lines.map((l) => [
-    String(s.number), pdfText(fmtDateTime(s.date)), pdfText(l.ref), pdfText(l.name), String(l.qty), pdfMoney(l.price), pdfMoney(l.qty * l.price), s.voidedAt ? 'Anulada' : '',
-  ]));
+  const saleRows = r.sales.flatMap((s) => s.lines.map((l) => {
+    const unit = l.unit || 'ud';
+    return [String(s.number), pdfText(fmtDateTime(s.date)), pdfText(l.ref), pdfText(l.name), pdfQty(l.qty, unit), pdfPrice(l.price, unit), pdfMoney(amountOf(l.qty, l.price, unit)), s.voidedAt ? 'Anulada' : ''];
+  }));
   const validTotal = round2(r.sales.filter((s) => !s.voidedAt).reduce((s, v) => s + v.total, 0));
   doc.autoTable({
     ...tableBase,
     startY: y + 4,
-    head: [['Nº', 'Fecha', 'Ref.', 'Producto', 'Uds.', 'Precio', 'Importe', '']],
+    head: [['Nº', 'Fecha', 'Ref.', 'Producto', 'Cant.', 'Precio', 'Importe', '']],
     body: saleRows.length ? saleRows : [['', '', '', 'No hay ventas en el periodo', '', '', '', '']],
     foot: [['', '', '', 'TOTAL (sin anuladas)', '', '', pdfMoney(validTotal), '']],
     columnStyles: {
-      0: { cellWidth: 14 }, 1: { cellWidth: 34 }, 2: { cellWidth: 28 },
-      4: { halign: 'right', cellWidth: 16 }, 5: { halign: 'right', cellWidth: 24 }, 6: { halign: 'right', cellWidth: 26 },
-      7: { cellWidth: 20, textColor: ACCENT, fontStyle: 'bold' },
+      0: { cellWidth: 14 }, 1: { cellWidth: 34 }, 2: { cellWidth: 30 },
+      4: { halign: 'right', cellWidth: 20 }, 5: { halign: 'right', cellWidth: 30 }, 6: { halign: 'right', cellWidth: 26 },
+      7: { cellWidth: 20, textColor: DANGER, fontStyle: 'bold' },
     },
   });
   pdfFooter(doc);
@@ -947,26 +1027,35 @@ $$('[data-export]').forEach((b) => b.addEventListener('click', () => {
   }
 }));
 
-/* ---------- Settings, logo and backup ---------- */
+/* ---------- Settings, logo, samples and backup ---------- */
 
 function openSettings(focusBackup = false) {
   const s = state.settings;
   $('#stStore').value = s.storeName || '';
   $('#stTitle').value = s.title || '';
   $('#stLow').value = s.lowStock;
+  $('#stLowG').value = s.lowStockG;
+  $('#stStep').value = s.weightStep;
   $('#stLogoRemove').hidden = !s.logo;
+  $('#samplesSection').hidden = !state.products.some((p) => p.sample && !p.deletedAt);
   $('#stLastBackup').textContent = s.lastBackup ? `Última copia: ${fmtDateTime(s.lastBackup)}` : 'Todavía no has hecho ninguna copia.';
   openDlg('#settingsDlg');
   if (focusBackup) setTimeout(() => $('#backupSection').scrollIntoView({ behavior: 'smooth' }), 80);
 }
+
+const intOr = (v, fallback, min) => {
+  const n = Math.trunc(Number(v));
+  return Number.isFinite(n) && n >= min ? n : fallback;
+};
 
 $('#settingsForm').addEventListener('submit', (e) => {
   e.preventDefault();
   const s = state.settings;
   s.storeName = $('#stStore').value.trim();
   s.title = $('#stTitle').value.trim() || 'Inventario de la tienda';
-  const low = Math.trunc(Number($('#stLow').value));
-  s.lowStock = Number.isFinite(low) && low >= 0 ? low : 2;
+  s.lowStock = intOr($('#stLow').value, 2, 0);
+  s.lowStockG = intOr($('#stLowG').value, 200, 0);
+  s.weightStep = intOr($('#stStep').value, 50, 1);
   save();
   closeDlg(e.target);
   renderAll();
@@ -996,6 +1085,24 @@ $('#logoInput').addEventListener('change', async (e) => {
   }
 });
 $('#appTitle').addEventListener('click', () => openSettings());
+
+$('#samplesRemove').addEventListener('click', () => {
+  const ids = new Set(state.products.filter((p) => p.sample).map((p) => p.id));
+  if (!ids.size) return;
+  if (!confirm(`¿Quitar los ${ids.size} productos de ejemplo? Se borran también sus movimientos.`)) return;
+  state.products = state.products.filter((p) => !ids.has(p.id));
+  state.movements = state.movements.filter((m) => !ids.has(m.productId));
+  state.sales = state.sales
+    .map((s) => {
+      const lines = s.lines.filter((l) => !ids.has(l.productId));
+      return { ...s, lines, total: round2(lines.reduce((t, l) => t + amountOf(l.qty, l.price, l.unit || 'ud'), 0)) };
+    })
+    .filter((s) => s.lines.length);
+  save();
+  $('#samplesSection').hidden = true;
+  renderAll();
+  toast('Productos de ejemplo quitados');
+});
 
 function downloadBlob(blob, name) {
   const a = document.createElement('a');
@@ -1027,6 +1134,8 @@ $('#backupFile').addEventListener('change', async (e) => {
     const n = raw.products.filter((p) => !p.deletedAt).length;
     if (!confirm(`La copia tiene ${n} productos y ${(raw.sales || []).length} ventas. Se sustituirá TODO lo que hay ahora. ¿Seguir?`)) return;
     state = normalizeState(raw);
+    state.settings.brandApplied = true;
+    state.settings.samplesSeeded = true;
     await save();
     closeDlg($('#backupImport'));
     renderAll();
@@ -1035,6 +1144,39 @@ $('#backupFile').addEventListener('change', async (e) => {
     toast('Ese fichero no es una copia válida del inventario.', 4000);
   }
 });
+
+/* ---------- First run branding and samples ---------- */
+
+async function applyBranding() {
+  const s = state.settings;
+  if (s.brandApplied) return false;
+  if (!s.storeName) s.storeName = BRAND.storeName;
+  if (!s.logo) {
+    try {
+      s.logo = await urlToDataUrl(BRAND.logo);
+      s.logoW = 600; s.logoH = 600;
+    } catch { /* uploadable later from Ajustes */ }
+  }
+  s.brandApplied = true;
+  return true;
+}
+
+async function seedSamples() {
+  const s = state.settings;
+  if (s.samplesSeeded) return false;
+  s.samplesSeeded = true;
+  if (state.products.length) return true;
+  const base = Date.now() - SAMPLES.length * 1000;
+  for (const [i, x] of SAMPLES.entries()) {
+    let photo = null;
+    try { photo = await urlToDataUrl(`img/ejemplos/${x.photo}`); } catch { /* no photo */ }
+    const createdAt = base + i * 1000;
+    const p = { id: uid(), ref: x.ref, name: x.name, unit: x.unit, price: x.price, units: x.units, photo, createdAt, deletedAt: null, sample: true };
+    state.products.push(p);
+    addMovement(p.id, x.units, 'alta', { date: createdAt, note: 'Producto de ejemplo' });
+  }
+  return true;
+}
 
 /* ---------- Toolbar ---------- */
 
@@ -1055,6 +1197,9 @@ document.addEventListener('click', (e) => {
 (async function boot() {
   try { state = normalizeState(await storage.load()); } catch { state = defaultState(); }
   renderAll();
+  const branded = await applyBranding();
+  const seeded = await seedSamples();
+  if (branded || seeded) { save(); renderAll(); }
   navigator.storage?.persist?.().catch(() => {});
   if ('serviceWorker' in navigator && location.protocol.startsWith('http')) {
     navigator.serviceWorker.register('sw.js').catch(() => {});

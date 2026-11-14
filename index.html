@@ -3,11 +3,11 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-  <meta name="theme-color" content="#f3ede2">
+  <meta name="theme-color" content="#f5f3ea">
   <meta name="mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-capable" content="yes">
-  <meta name="apple-mobile-web-app-title" content="Inventario">
-  <title>Inventario de la tienda</title>
+  <meta name="apple-mobile-web-app-title" content="Sabor Nature">
+  <title>Inventario · Sabor Nature</title>
   <link rel="manifest" href="manifest.webmanifest">
   <link rel="icon" href="icons/icon-192.png" type="image/png">
   <link rel="apple-touch-icon" href="icons/icon-192.png">
@@ -29,7 +29,7 @@
     </div>
     <dl class="stats">
       <div><dt>Productos</dt><dd id="statProducts">0</dd></div>
-      <div><dt>Unidades</dt><dd id="statUnits">0</dd></div>
+      <div><dt>Bajo mínimos</dt><dd id="statLow">0</dd></div>
       <div><dt>Valor del stock</dt><dd id="statValue">0 €</dd></div>
       <div><dt>Vendido hoy</dt><dd id="statToday">0 €</dd></div>
     </dl>
@@ -42,11 +42,11 @@
 
   <nav class="toolbar">
     <div class="search">
-      <input id="search" type="search" placeholder="Buscar por referencia o nombre…" autocomplete="off">
+      <input id="search" type="search" placeholder="Buscar té, café, incienso, referencia…" autocomplete="off">
       <select id="sort" aria-label="Ordenar">
         <option value="name">Nombre</option>
         <option value="ref">Referencia</option>
-        <option value="units">Menos unidades</option>
+        <option value="units">Menos stock</option>
         <option value="recent">Recientes</option>
       </select>
     </div>
@@ -78,7 +78,7 @@
     <ul id="list" class="ledger"></ul>
     <div id="empty" class="empty" hidden>
       <p class="empty-title">Todavía no hay productos</p>
-      <p>Empieza añadiendo el primero: referencia, nombre, foto, precio y unidades.</p>
+      <p>Empieza por tus tés, cafés e inciensos: referencia, nombre, foto, precio y existencias.</p>
       <button type="button" class="btn btn-sale" data-open="product">+ Añadir el primer producto</button>
     </div>
     <p id="noMatch" class="empty" hidden>Ningún producto coincide con la búsqueda.</p>
@@ -95,10 +95,14 @@
           <span id="pPhotoPh">Añadir foto</span>
         </label>
         <div class="fields">
-          <label>Referencia<input id="pRef" required maxlength="40" autocomplete="off"></label>
-          <label>Nombre<input id="pName" required maxlength="120" autocomplete="off"></label>
+          <div class="seg" role="radiogroup" aria-label="Se vende">
+            <label><input type="radio" name="pUnit" value="ud" checked><span>Por unidades</span></label>
+            <label><input type="radio" name="pUnit" value="g"><span>Al peso (gramos)</span></label>
+          </div>
+          <label>Referencia<input id="pRef" required maxlength="40" autocomplete="off" placeholder="p. ej. TE-ROJO-01"></label>
+          <label>Nombre<input id="pName" required maxlength="120" autocomplete="off" placeholder="p. ej. Té rojo Galleta Festiva"></label>
           <div class="two">
-            <label>Precio (€)<input id="pPrice" type="number" step="0.01" min="0" required inputmode="decimal"></label>
+            <label><span id="pPriceLabel">Precio (€)</span><input id="pPrice" type="number" step="0.01" min="0" required inputmode="decimal"></label>
             <label><span id="pUnitsLabel">Unidades iniciales</span><input id="pUnits" type="number" step="1" min="0" required inputmode="numeric"></label>
           </div>
           <button type="button" id="pPhotoRemove" class="link" hidden>Quitar foto</button>
@@ -119,8 +123,8 @@
     <form id="adjustForm" method="dialog" class="sheet sheet-narrow">
       <header class="sheet-head"><h2>Ajustar unidades</h2><button type="button" class="x" data-close aria-label="Cerrar">×</button></header>
       <p class="adjust-product"><span id="aRef" class="ref"></span> <strong id="aName"></strong></p>
-      <p class="adjust-now">Ahora hay <b id="aUnits">0</b> unidades</p>
-      <label>Cantidad<input id="aQty" type="number" min="0" step="1" required inputmode="numeric"></label>
+      <p class="adjust-now">Ahora hay <b id="aUnits">0</b></p>
+      <label><span id="aQtyLabel">Cantidad</span><input id="aQty" type="number" min="0" step="1" required inputmode="numeric"></label>
       <label>Nota (opcional)<input id="aNote" maxlength="120" placeholder="p. ej. pedido del proveedor, rotura…"></label>
       <p id="adjustError" class="error" hidden></p>
       <footer class="sheet-foot sheet-foot-wrap">
@@ -143,7 +147,7 @@
         <label class="sale-date">Fecha<input id="sDate" type="datetime-local" required></label>
       </div>
       <table class="lines">
-        <thead><tr><th>Producto</th><th class="num">Uds.</th><th class="num">Precio</th><th class="num">Importe</th><th></th></tr></thead>
+        <thead><tr><th>Producto</th><th class="num">Cant.</th><th class="num">Precio</th><th class="num">Importe</th><th></th></tr></thead>
         <tbody id="sLines"></tbody>
       </table>
       <p id="sEmpty" class="lines-empty">Añade productos con el buscador de arriba.</p>
@@ -200,13 +204,22 @@
   <dialog id="settingsDlg">
     <form id="settingsForm" method="dialog" class="sheet sheet-narrow">
       <header class="sheet-head"><h2>Ajustes</h2><button type="button" class="x" data-close aria-label="Cerrar">×</button></header>
-      <label>Nombre de la tienda<input id="stStore" maxlength="80" placeholder="p. ej. Ferretería Martos"></label>
+      <label>Nombre de la tienda<input id="stStore" maxlength="80" placeholder="p. ej. Sabor Nature"></label>
       <label>Título<input id="stTitle" maxlength="80"></label>
-      <label>Avisar de poco stock con estas unidades o menos<input id="stLow" type="number" min="0" step="1"></label>
+      <div class="two">
+        <label>Poco stock (unidades)<input id="stLow" type="number" min="0" step="1" inputmode="numeric"></label>
+        <label>Poco stock (gramos)<input id="stLowG" type="number" min="0" step="10" inputmode="numeric"></label>
+      </div>
+      <label>Gramos por pulsación en − / +<input id="stStep" type="number" min="1" step="1" inputmode="numeric"></label>
       <div class="logo-row">
         <button type="button" class="btn btn-ghost btn-small" id="stLogoChange">Cambiar logo</button>
         <button type="button" class="btn btn-ghost btn-small" id="stLogoRemove">Quitar logo</button>
       </div>
+      <section id="samplesSection" class="backup" hidden>
+        <h3>Productos de ejemplo</h3>
+        <p>Los que llevan la etiqueta «Ejemplo» salen de las publicaciones de Instagram y tienen precios orientativos. Si editas uno pasa a ser tuyo; los demás se quitan aquí.</p>
+        <div class="logo-row"><button type="button" class="btn btn-danger btn-small" id="samplesRemove">Quitar productos de ejemplo</button></div>
+      </section>
       <section id="backupSection" class="backup">
         <h3>Copia de seguridad</h3>
         <p>Los datos se guardan solo en este navegador. Descarga una copia de vez en cuando y guárdala fuera (pendrive, Drive…). Con ella puedes recuperar todo o pasarlo a otro ordenador.</p>

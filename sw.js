@@ -1,4 +1,4 @@
-const VERSION = 'v1';
+const VERSION = 'v2';
 const SHELL = `inventario-shell-${VERSION}`;
 const FONTS = 'inventario-fonts';
 const FILES = [
@@ -12,6 +12,7 @@ const FILES = [
   'vendor/jspdf.plugin.autotable.min.js',
   'icons/icon-192.png',
   'icons/icon-512.png',
+  'img/logo-sabor-nature.png',
 ];
 
 self.addEventListener('install', (e) => {
