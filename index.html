@@ -1,0 +1,236 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#f3ede2">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-title" content="Inventario">
+  <title>Inventario de la tienda</title>
+  <link rel="manifest" href="manifest.webmanifest">
+  <link rel="icon" href="icons/icon-192.png" type="image/png">
+  <link rel="apple-touch-icon" href="icons/icon-192.png">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght@0,9..144,400;0,9..144,600;0,9..144,800;1,9..144,500&family=Instrument+Sans:wght@400;500;600;700&family=JetBrains+Mono:wght@500;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <header class="masthead">
+    <button id="logoBtn" class="logo" type="button" title="Cambiar logo">
+      <img id="logoImg" alt="Logo" hidden>
+      <span id="logoPh" class="logo-ph">Tu logo<small>pulsa para subirlo</small></span>
+    </button>
+    <div class="titles">
+      <p id="storeName" class="eyebrow"></p>
+      <h1 id="appTitle" title="Cambiar en Ajustes">Inventario de la tienda</h1>
+      <p id="today" class="today"></p>
+    </div>
+    <dl class="stats">
+      <div><dt>Productos</dt><dd id="statProducts">0</dd></div>
+      <div><dt>Unidades</dt><dd id="statUnits">0</dd></div>
+      <div><dt>Valor del stock</dt><dd id="statValue">0 €</dd></div>
+      <div><dt>Vendido hoy</dt><dd id="statToday">0 €</dd></div>
+    </dl>
+  </header>
+
+  <div id="backupWarn" class="banner" hidden>
+    <span id="backupWarnText"></span>
+    <button type="button" class="btn btn-small" data-open="backup">Hacer copia ahora</button>
+  </div>
+
+  <nav class="toolbar">
+    <div class="search">
+      <input id="search" type="search" placeholder="Buscar por referencia o nombre…" autocomplete="off">
+      <select id="sort" aria-label="Ordenar">
+        <option value="name">Nombre</option>
+        <option value="ref">Referencia</option>
+        <option value="units">Menos unidades</option>
+        <option value="recent">Recientes</option>
+      </select>
+    </div>
+    <div class="actions">
+      <button type="button" class="act act-sale" id="saleBtn">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 2h12v20l-3-2-3 2-3-2-3 2z"/><path d="M9 7h6M9 11h6M9 15h4"/></svg>
+        <span>Venta</span>
+      </button>
+      <button type="button" class="act act-add" id="addBtn">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg>
+        <span>Producto</span>
+      </button>
+      <button type="button" class="act" id="exportBtn">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3v12M7 10l5 5 5-5M4 20h16"/></svg>
+        <span>Exportar</span>
+      </button>
+      <button type="button" class="act" id="historyBtn">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg>
+        <span>Historial</span>
+      </button>
+      <button type="button" class="act" id="settingsBtn" title="Ajustes y copia de seguridad">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 6h10M18 6h2M4 12h4M12 12h8M4 18h12M20 18h0"/><circle cx="16" cy="6" r="2"/><circle cx="10" cy="12" r="2"/><circle cx="18" cy="18" r="2"/></svg>
+        <span>Ajustes</span>
+      </button>
+    </div>
+  </nav>
+
+  <main>
+    <ul id="list" class="ledger"></ul>
+    <div id="empty" class="empty" hidden>
+      <p class="empty-title">Todavía no hay productos</p>
+      <p>Empieza añadiendo el primero: referencia, nombre, foto, precio y unidades.</p>
+      <button type="button" class="btn btn-sale" data-open="product">+ Añadir el primer producto</button>
+    </div>
+    <p id="noMatch" class="empty" hidden>Ningún producto coincide con la búsqueda.</p>
+  </main>
+
+  <!-- Producto -->
+  <dialog id="productDlg">
+    <form id="productForm" method="dialog" class="sheet">
+      <header class="sheet-head"><h2 id="productDlgTitle">Nuevo producto</h2><button type="button" class="x" data-close aria-label="Cerrar">×</button></header>
+      <div class="product-grid">
+        <label class="photo-pick">
+          <input id="pPhotoInput" type="file" accept="image/*" hidden>
+          <img id="pPhotoPreview" alt="" hidden>
+          <span id="pPhotoPh">Añadir foto</span>
+        </label>
+        <div class="fields">
+          <label>Referencia<input id="pRef" required maxlength="40" autocomplete="off"></label>
+          <label>Nombre<input id="pName" required maxlength="120" autocomplete="off"></label>
+          <div class="two">
+            <label>Precio (€)<input id="pPrice" type="number" step="0.01" min="0" required inputmode="decimal"></label>
+            <label><span id="pUnitsLabel">Unidades iniciales</span><input id="pUnits" type="number" step="1" min="0" required inputmode="numeric"></label>
+          </div>
+          <button type="button" id="pPhotoRemove" class="link" hidden>Quitar foto</button>
+        </div>
+      </div>
+      <p id="productError" class="error" hidden></p>
+      <footer class="sheet-foot">
+        <button type="button" id="pDelete" class="btn btn-danger" hidden>Eliminar producto</button>
+        <span class="spacer"></span>
+        <button type="button" class="btn btn-ghost" data-close>Cancelar</button>
+        <button type="submit" class="btn btn-ink">Guardar</button>
+      </footer>
+    </form>
+  </dialog>
+
+  <!-- Ajuste de stock -->
+  <dialog id="adjustDlg">
+    <form id="adjustForm" method="dialog" class="sheet sheet-narrow">
+      <header class="sheet-head"><h2>Ajustar unidades</h2><button type="button" class="x" data-close aria-label="Cerrar">×</button></header>
+      <p class="adjust-product"><span id="aRef" class="ref"></span> <strong id="aName"></strong></p>
+      <p class="adjust-now">Ahora hay <b id="aUnits">0</b> unidades</p>
+      <label>Cantidad<input id="aQty" type="number" min="0" step="1" required inputmode="numeric"></label>
+      <label>Nota (opcional)<input id="aNote" maxlength="120" placeholder="p. ej. pedido del proveedor, rotura…"></label>
+      <p id="adjustError" class="error" hidden></p>
+      <footer class="sheet-foot sheet-foot-wrap">
+        <button type="button" class="btn btn-plus" data-adjust="add">+ Sumar</button>
+        <button type="button" class="btn btn-minus" data-adjust="sub">− Restar</button>
+        <button type="button" class="btn btn-ghost" data-adjust="set" title="Pon el número exacto tras contar">= Fijar recuento</button>
+      </footer>
+    </form>
+  </dialog>
+
+  <!-- Venta -->
+  <dialog id="saleDlg">
+    <form id="saleForm" method="dialog" class="sheet sheet-wide">
+      <header class="sheet-head"><h2>Registrar venta</h2><button type="button" class="x" data-close aria-label="Cerrar">×</button></header>
+      <div class="sale-top">
+        <div class="picker">
+          <input id="sSearch" type="search" placeholder="Busca un producto para añadirlo…" autocomplete="off">
+          <ul id="sResults" class="results" hidden></ul>
+        </div>
+        <label class="sale-date">Fecha<input id="sDate" type="datetime-local" required></label>
+      </div>
+      <table class="lines">
+        <thead><tr><th>Producto</th><th class="num">Uds.</th><th class="num">Precio</th><th class="num">Importe</th><th></th></tr></thead>
+        <tbody id="sLines"></tbody>
+      </table>
+      <p id="sEmpty" class="lines-empty">Añade productos con el buscador de arriba.</p>
+      <p id="saleError" class="error" hidden></p>
+      <footer class="sheet-foot">
+        <div class="total">Total <b id="sTotal">0,00 €</b></div>
+        <span class="spacer"></span>
+        <button type="button" class="btn btn-ghost" data-close>Cancelar</button>
+        <button type="submit" id="sSubmit" class="btn btn-sale" disabled>Registrar y descontar</button>
+      </footer>
+    </form>
+  </dialog>
+
+  <!-- Exportar -->
+  <dialog id="exportDlg">
+    <form id="exportForm" method="dialog" class="sheet sheet-narrow">
+      <header class="sheet-head"><h2>Exportar inventario</h2><button type="button" class="x" data-close aria-label="Cerrar">×</button></header>
+      <fieldset class="choice">
+        <label><input type="radio" name="eMode" value="current" checked> <span><b>Inventario actual</b><small>Lo que hay ahora mismo, con precio y valor.</small></span></label>
+        <label><input type="radio" name="eMode" value="range"> <span><b>Un tramo de fechas</b><small>Stock al inicio y al final, entradas, ventas y salidas del periodo.</small></span></label>
+      </fieldset>
+      <div id="eRange" class="two" hidden>
+        <label>Desde<input id="eFrom" type="date"></label>
+        <label>Hasta<input id="eTo" type="date"></label>
+      </div>
+      <p id="exportError" class="error" hidden></p>
+      <footer class="sheet-foot">
+        <span class="spacer"></span>
+        <button type="button" class="btn btn-ink" data-export="xlsx">Excel</button>
+        <button type="button" class="btn btn-ink" data-export="pdf">PDF</button>
+      </footer>
+    </form>
+  </dialog>
+
+  <!-- Historial -->
+  <dialog id="historyDlg">
+    <div class="sheet sheet-wide">
+      <header class="sheet-head"><h2>Historial</h2><button type="button" class="x" data-close aria-label="Cerrar">×</button></header>
+      <div class="history-bar">
+        <div class="tabs" role="tablist">
+          <button type="button" role="tab" class="tab is-on" data-tab="sales">Ventas</button>
+          <button type="button" role="tab" class="tab" data-tab="moves">Movimientos</button>
+        </div>
+        <div class="two">
+          <label>Desde<input id="hFrom" type="date"></label>
+          <label>Hasta<input id="hTo" type="date"></label>
+        </div>
+      </div>
+      <div id="historyBody" class="history-body"></div>
+    </div>
+  </dialog>
+
+  <!-- Ajustes -->
+  <dialog id="settingsDlg">
+    <form id="settingsForm" method="dialog" class="sheet sheet-narrow">
+      <header class="sheet-head"><h2>Ajustes</h2><button type="button" class="x" data-close aria-label="Cerrar">×</button></header>
+      <label>Nombre de la tienda<input id="stStore" maxlength="80" placeholder="p. ej. Ferretería Martos"></label>
+      <label>Título<input id="stTitle" maxlength="80"></label>
+      <label>Avisar de poco stock con estas unidades o menos<input id="stLow" type="number" min="0" step="1"></label>
+      <div class="logo-row">
+        <button type="button" class="btn btn-ghost btn-small" id="stLogoChange">Cambiar logo</button>
+        <button type="button" class="btn btn-ghost btn-small" id="stLogoRemove">Quitar logo</button>
+      </div>
+      <section id="backupSection" class="backup">
+        <h3>Copia de seguridad</h3>
+        <p>Los datos se guardan solo en este navegador. Descarga una copia de vez en cuando y guárdala fuera (pendrive, Drive…). Con ella puedes recuperar todo o pasarlo a otro ordenador.</p>
+        <p id="stLastBackup" class="muted"></p>
+        <div class="logo-row">
+          <button type="button" class="btn btn-ink btn-small" id="backupExport">Descargar copia</button>
+          <button type="button" class="btn btn-ghost btn-small" id="backupImport">Restaurar copia…</button>
+          <input id="backupFile" type="file" accept="application/json,.json" hidden>
+        </div>
+      </section>
+      <footer class="sheet-foot">
+        <span class="spacer"></span>
+        <button type="button" class="btn btn-ghost" data-close>Cancelar</button>
+        <button type="submit" class="btn btn-ink">Guardar</button>
+      </footer>
+    </form>
+  </dialog>
+
+  <input id="logoInput" type="file" accept="image/*" hidden>
+  <div id="toast" class="toast" role="status" aria-live="polite"></div>
+
+  <script src="vendor/xlsx.full.min.js"></script>
+  <script src="vendor/jspdf.umd.min.js"></script>
+  <script src="vendor/jspdf.plugin.autotable.min.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>
