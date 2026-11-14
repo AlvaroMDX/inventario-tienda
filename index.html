@@ -27,12 +27,19 @@
       <h1 id="appTitle" title="Cambiar en Ajustes">Inventario de la tienda</h1>
       <p id="today" class="today"></p>
     </div>
-    <dl class="stats">
-      <div><dt>Productos</dt><dd id="statProducts">0</dd></div>
-      <div><dt>Bajo mínimos</dt><dd id="statLow">0</dd></div>
-      <div><dt>Valor del stock</dt><dd id="statValue">0 €</dd></div>
-      <div><dt>Vendido hoy</dt><dd id="statToday">0 €</dd></div>
-    </dl>
+    <div class="stats-wrap">
+      <button type="button" id="figuresBtn" class="figures-toggle" aria-pressed="true">
+        <svg viewBox="0 0 24 24" aria-hidden="true" class="eye-open"><path d="M2 12s3.6-7 10-7 10 7 10 7-3.6 7-10 7S2 12 2 12z"/><circle cx="12" cy="12" r="3"/></svg>
+        <svg viewBox="0 0 24 24" aria-hidden="true" class="eye-closed"><path d="M3 3l18 18"/><path d="M10.6 5.1A10.4 10.4 0 0 1 12 5c6.4 0 10 7 10 7a17 17 0 0 1-3.2 4.1M6.6 6.6C3.7 8.5 2 12 2 12s3.6 7 10 7a9.7 9.7 0 0 0 5.4-1.6"/><path d="M9.9 9.9a3 3 0 0 0 4.2 4.2"/></svg>
+        <span id="figuresLabel">Mostrar cifras</span>
+      </button>
+      <dl class="stats">
+        <div><dt>Productos</dt><dd id="statProducts">0</dd></div>
+        <div><dt>Bajo mínimos</dt><dd id="statLow">0</dd></div>
+        <div><dt>Valor del stock</dt><dd id="statValue">0 €</dd></div>
+        <div><dt>Vendido hoy</dt><dd id="statToday">0 €</dd></div>
+      </dl>
+    </div>
   </header>
 
   <div id="backupWarn" class="banner" hidden>
@@ -217,7 +224,7 @@
       </div>
       <section id="samplesSection" class="backup" hidden>
         <h3>Productos de ejemplo</h3>
-        <p>Los que llevan la etiqueta «Ejemplo» salen de las publicaciones de Instagram y tienen precios orientativos. Si editas uno pasa a ser tuyo; los demás se quitan aquí.</p>
+        <p>Quita de golpe los productos de ejemplo que no hayas editado.</p>
         <div class="logo-row"><button type="button" class="btn btn-danger btn-small" id="samplesRemove">Quitar productos de ejemplo</button></div>
       </section>
       <section id="backupSection" class="backup">

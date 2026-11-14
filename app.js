@@ -55,6 +55,8 @@ const fmtQty = (q, unit) => {
   if (unit === 'g') return Math.abs(q) >= 1000 ? `${fmtNum(q / 1000)} kg` : `${fmtNum(q)} g`;
   return `${fmtNum(q)} ${Math.abs(q) === 1 ? 'ud.' : 'uds.'}`;
 };
+const MASK = '****';
+const shown = (text) => (state.settings.hideFigures ? MASK : text);
 const stepOf = (p) => (isWeight(p) ? state.settings.weightStep : 1);
 const lowLimit = (p) => (isWeight(p) ? state.settings.lowStockG : state.settings.lowStock);
 
@@ -68,7 +70,7 @@ function defaultState() {
     version: 2,
     settings: {
       title: 'Inventario de la tienda', storeName: '', lowStock: 2, lowStockG: 200, weightStep: 50,
-      logo: null, logoW: 0, logoH: 0, lastBackup: null, brandApplied: false, samplesSeeded: false,
+      logo: null, logoW: 0, logoH: 0, lastBackup: null, brandApplied: false, samplesSeeded: false, hideFigures: true,
     },
     products: [],
     movements: [],
@@ -217,24 +219,22 @@ function rowHtml(p, i) {
   const unit = unitOf(p);
   const step = stepOf(p);
   const badge = cls === 'out' ? '<span class="badge">Agotado</span>' : cls === 'low' ? '<span class="badge">Poco stock</span>' : '';
-  const sample = p.sample ? '<span class="badge sample">Ejemplo</span>' : '';
   const thumb = p.photo ? `<img src="${p.photo}" alt="" loading="lazy">` : esc(initials(p.name));
-  const shown = unit === 'g' ? fmtNum(p.units) : fmtNum(p.units);
   const small = unit === 'g' ? 'g' : 'uds.';
   return `<li class="row ${cls}" data-id="${p.id}" style="--i:${Math.min(i, 20)}">
     <div class="thumb">${thumb}</div>
     <div class="info">
       <span class="ref">${esc(p.ref)}</span>
       <span class="name">${esc(p.name)}</span>
-      <span class="price">${fmtPrice(p.price, unit)}<span class="value">· ${fmtMoney(amountOf(p.units, p.price, unit))} en stock</span></span>
+      <span class="price">${fmtPrice(p.price, unit)}<span class="value">· ${shown(fmtMoney(amountOf(p.units, p.price, unit)))} en stock</span></span>
     </div>
     <div class="step-area">
       <div class="stepper">
         <button type="button" class="dec" data-act="dec" aria-label="Restar ${esc(fmtQty(step, unit))}">−</button>
-        <button type="button" class="units" data-act="adjust" title="Sumar, restar o fijar una cantidad"><b>${shown}</b><small>${small}</small></button>
+        <button type="button" class="units" data-act="adjust" title="Sumar, restar o fijar una cantidad"><b>${fmtNum(p.units)}</b><small>${small}</small></button>
         <button type="button" class="inc" data-act="inc" aria-label="Sumar ${esc(fmtQty(step, unit))}">+</button>
       </div>
-      ${badge}${sample}
+      ${badge}
       <div class="row-actions">
         <button type="button" class="icon-btn sell" data-act="sell" title="Vender" aria-label="Vender">${ICON_SELL}</button>
         <button type="button" class="icon-btn" data-act="edit" title="Editar" aria-label="Editar">${ICON_EDIT}</button>
@@ -279,13 +279,23 @@ function renderList() {
 
 function renderStats() {
   const all = activeProducts();
-  $('#statProducts').textContent = fmtNum(all.length);
-  $('#statLow').textContent = fmtNum(all.filter((p) => stockClass(p) !== '').length);
-  $('#statValue').textContent = fmtMoney(all.reduce((s, p) => s + amountOf(p.units, p.price, unitOf(p)), 0));
+  $('#statProducts').textContent = shown(fmtNum(all.length));
+  $('#statLow').textContent = shown(fmtNum(all.filter((p) => stockClass(p) !== '').length));
+  $('#statValue').textContent = shown(fmtMoney(all.reduce((s, p) => s + amountOf(p.units, p.price, unitOf(p)), 0)));
   const from = dayStart(isoDay(new Date()));
   const today = state.sales.filter((s) => !s.voidedAt && s.date >= from && s.date <= from + 86400000 - 1).reduce((s, v) => s + v.total, 0);
-  $('#statToday').textContent = fmtMoney(today);
+  $('#statToday').textContent = shown(fmtMoney(today));
+  const hidden = state.settings.hideFigures;
+  $('#figuresBtn').setAttribute('aria-pressed', String(hidden));
+  $('#figuresLabel').textContent = hidden ? 'Mostrar cifras' : 'Ocultar cifras';
 }
+
+$('#figuresBtn').addEventListener('click', () => {
+  state.settings.hideFigures = !state.settings.hideFigures;
+  save();
+  renderStats();
+  renderList();
+});
 
 function renderHeader() {
   const s = state.settings;
@@ -1173,7 +1183,7 @@ async function seedSamples() {
     const createdAt = base + i * 1000;
     const p = { id: uid(), ref: x.ref, name: x.name, unit: x.unit, price: x.price, units: x.units, photo, createdAt, deletedAt: null, sample: true };
     state.products.push(p);
-    addMovement(p.id, x.units, 'alta', { date: createdAt, note: 'Producto de ejemplo' });
+    addMovement(p.id, x.units, 'alta', { date: createdAt });
   }
   return true;
 }
