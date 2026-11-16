@@ -71,6 +71,7 @@ function defaultState() {
     settings: {
       title: 'Inventario de la tienda', storeName: '', lowStock: 2, lowStockG: 200, weightStep: 50,
       logo: null, logoW: 0, logoH: 0, lastBackup: null, brandApplied: false, samplesSeeded: false, hideFigures: true,
+      theme: 'auto',
     },
     products: [],
     movements: [],
@@ -321,7 +322,19 @@ function renderBackupWarn() {
   }
 }
 
+const THEME_KEY = 'inventario-theme';
+const darkQuery = matchMedia('(prefers-color-scheme: dark)');
+function applyTheme() {
+  const pref = state.settings.theme || 'auto';
+  const dark = pref === 'dark' || (pref === 'auto' && darkQuery.matches);
+  document.documentElement.dataset.theme = dark ? 'dark' : 'light';
+  $('meta[name="theme-color"]').content = dark ? '#171813' : '#f5f3ea';
+  try { localStorage.setItem(THEME_KEY, pref); } catch { /* private mode */ }
+}
+darkQuery.addEventListener('change', applyTheme);
+
 function renderAll() {
+  applyTheme();
   renderHeader();
   renderStats();
   renderList();
@@ -1046,6 +1059,7 @@ function openSettings(focusBackup = false) {
   $('#stLow').value = s.lowStock;
   $('#stLowG').value = s.lowStockG;
   $('#stStep').value = s.weightStep;
+  $(`input[name="stTheme"][value="${s.theme || 'auto'}"]`).checked = true;
   $('#stLogoRemove').hidden = !s.logo;
   $('#samplesSection').hidden = !state.products.some((p) => p.sample && !p.deletedAt);
   $('#stLastBackup').textContent = s.lastBackup ? `Última copia: ${fmtDateTime(s.lastBackup)}` : 'Todavía no has hecho ninguna copia.';
@@ -1070,6 +1084,12 @@ $('#settingsForm').addEventListener('submit', (e) => {
   closeDlg(e.target);
   renderAll();
 });
+
+document.querySelectorAll('input[name="stTheme"]').forEach((r) => r.addEventListener('change', () => {
+  state.settings.theme = r.value;
+  save();
+  applyTheme();
+}));
 
 $('#logoBtn').addEventListener('click', () => $('#logoInput').click());
 $('#stLogoChange').addEventListener('click', () => $('#logoInput').click());
